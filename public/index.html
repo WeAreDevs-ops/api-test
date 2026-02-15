@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Roblox Inventory Viewer</title>
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    input, button { margin: 5px; padding: 5px; }
+    .section { margin-top: 20px; }
+  </style>
+</head>
+<body>
+
+<h2>Roblox Inventory Viewer</h2>
+
+<input type="text" id="userId" placeholder="User ID" />
+<br>
+<textarea id="cookie" placeholder=".ROBLOSECURITY" rows="3" cols="50"></textarea>
+<br>
+<button onclick="loadInventory()">Fetch Inventory</button>
+
+<div id="results"></div>
+
+<script>
+async function loadInventory() {
+  const userId = document.getElementById("userId").value;
+  const roblosecurity = document.getElementById("cookie").value;
+
+  const response = await fetch("/api/inventory", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, roblosecurity })
+  });
+
+  const data = await response.json();
+
+  const resultsDiv = document.getElementById("results");
+  resultsDiv.innerHTML = "";
+
+  for (let category in data) {
+    const section = document.createElement("div");
+    section.className = "section";
+
+    section.innerHTML = `<h3>${category.toUpperCase()}</h3>`;
+
+    if (data[category].length === 0) {
+      section.innerHTML += "<p>No items found</p>";
+    } else {
+      data[category].forEach(item => {
+        section.innerHTML += `<p>${item.name} (ID: ${item.assetId})</p>`;
+      });
+    }
+
+    resultsDiv.appendChild(section);
+  }
+}
+</script>
+
+</body>
+</html>
