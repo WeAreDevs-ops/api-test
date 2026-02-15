@@ -1,94 +1,82 @@
 import express from "express";
-import fetch from "node-fetch";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve frontend
+// Simple frontend
 app.get("/", (req, res) => {
   res.send(`
-    <html>
-      <head>
-        <title>Roblox Inventory Viewer</title>
-      </head>
-      <body>
-        <h1>Roblox Inventory Viewer</h1>
-        <form id="inventoryForm">
-          <label>Roblox User ID:</label><br/>
-          <input type="text" id="userId" placeholder="Enter User ID" required /><br/>
-          <label>Or .ROBLOSECURITY Cookie:</label><br/>
-          <input type="text" id="roblosecurity" placeholder="Enter .ROBLOSECURITY" /><br/><br/>
-          <button type="submit">Fetch Inventory</button>
-        </form>
-        <pre id="output"></pre>
-
-        <script>
-          const form = document.getElementById("inventoryForm");
-          const output = document.getElementById("output");
-          form.addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const userId = document.getElementById("userId").value;
-            const roblosecurity = document.getElementById("roblosecurity").value;
-
-            const res = await fetch("/api/inventory", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ userId, roblosecurity })
-            });
-
-            const data = await res.json();
-            output.textContent = JSON.stringify(data, null, 2);
-          });
-        </script>
-      </body>
-    </html>
+    <h2>Roblox Inventory Viewer</h2>
+    <form method="POST" action="/inventory">
+      <input name="cookie" placeholder=".ROBLOSECURITY" style="width:400px" required />
+      <br><br>
+      <button type="submit">Fetch Inventory</button>
+    </form>
   `);
 });
 
-// API endpoint
-app.post("/api/inventory", async (req, res) => {
-  const { userId, roblosecurity } = req.body;
-  if (!userId) return res.status(400).json({ error: "User ID is required" });
+app.post("/inventory", async (req, res) => {
+  const { cookie } = req.body;
+  if (!cookie) return res.status(400).json({ error: "Missing cookie" });
 
   const headers = {
+    "Cookie": `.ROBLOSECURITY=${cookie}`,
     "User-Agent": "Roblox/WinInet",
-    "Accept": "application/json",
+    "Accept": "application/json"
   };
-  if (roblosecurity) headers.Cookie = `.ROBLOSECURITY=${roblosecurity}`;
-
-  const assetTypes = ["Hair", "Face", "Bundle"];
-  const inventoryData = {};
 
   try {
-    // Fetch inventory by type
-    for (const type of assetTypes) {
-      const resp = await fetch(
-        `https://inventory.roblox.com/v1/users/${userId}/inventory?assetType=${type}`,
-        { headers }
-      );
-      const json = await resp.json();
-      inventoryData[type] = json.data || [];
+    // 1️⃣ Validate cookie + get authenticated user
+    const authRes = await fetch("https://users.roblox.com/v1/users/authenticated", {
+      headers
+    });
+
+    if (!authRes.ok) {
+      return res.status(401).json({ error: "Invalid RobloxSecurity cookie" });
     }
 
-    // Fetch collectibles
-    const collectiblesResp = await fetch(
-      `https://inventory.roblox.com/v1/users/${userId}/assets/collectibles`,
+    const userData = await authRes.json();
+    const userId = userData.id;
+
+    // 2️⃣ Fetch inventory categories
+    const assetTypes = ["Hair", "Face", "Bundle"];
+    const inventory = {};
+
+    for (const type of assetTypes) {
+      const invRes = await fetch(
+        `https://inventory.roblox.com/v1/users/${userId}/inventory?assetType=${type}&limit=100`,
+        { headers }
+      );
+
+      const invJson = await invRes.json();
+      inventory[type] = invJson.data || [];
+    }
+
+    // 3️⃣ Fetch collectibles
+    const colRes = await fetch(
+      `https://inventory.roblox.com/v1/users/${userId}/assets/collectibles?limit=100`,
       { headers }
     );
-    const collectiblesJson = await collectiblesResp.json();
-    inventoryData.collectibles = collectiblesJson.data || [];
 
-    return res.json({ success: true, inventory: inventoryData });
+    const colJson = await colRes.json();
+    inventory.collectibles = colJson.data || [];
+
+    // 4️⃣ Return REAL result
+    res.json({
+      success: true,
+      user: {
+        id: userData.id,
+        name: userData.name,
+        displayName: userData.displayName
+      },
+      inventory
+    });
+
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ error: "Server error", details: err.message });
   }
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Server running on port", PORT));
