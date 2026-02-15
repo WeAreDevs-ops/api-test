@@ -1,53 +1,94 @@
-const express = require("express");
-const fetch = require("node-fetch");
+import express from "express";
+import fetch from "node-fetch";
+
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// Parse JSON body
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Serve frontend from public folder
-app.use(express.static("public"));
+// Serve frontend
+app.get("/", (req, res) => {
+  res.send(`
+    <html>
+      <head>
+        <title>Roblox Inventory Viewer</title>
+      </head>
+      <body>
+        <h1>Roblox Inventory Viewer</h1>
+        <form id="inventoryForm">
+          <label>Roblox User ID:</label><br/>
+          <input type="text" id="userId" placeholder="Enter User ID" required /><br/>
+          <label>Or .ROBLOSECURITY Cookie:</label><br/>
+          <input type="text" id="roblosecurity" placeholder="Enter .ROBLOSECURITY" /><br/><br/>
+          <button type="submit">Fetch Inventory</button>
+        </form>
+        <pre id="output"></pre>
 
-// Inventory API endpoint
+        <script>
+          const form = document.getElementById("inventoryForm");
+          const output = document.getElementById("output");
+          form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const userId = document.getElementById("userId").value;
+            const roblosecurity = document.getElementById("roblosecurity").value;
+
+            const res = await fetch("/api/inventory", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId, roblosecurity })
+            });
+
+            const data = await res.json();
+            output.textContent = JSON.stringify(data, null, 2);
+          });
+        </script>
+      </body>
+    </html>
+  `);
+});
+
+// API endpoint
 app.post("/api/inventory", async (req, res) => {
   const { userId, roblosecurity } = req.body;
-
-  if (!userId || !roblosecurity) {
-    return res.status(400).json({ error: "Missing userId or roblosecurity" });
-  }
+  if (!userId) return res.status(400).json({ error: "User ID is required" });
 
   const headers = {
-    "Cookie": `.ROBLOSECURITY=${roblosecurity}`,
     "User-Agent": "Roblox/WinInet",
-    "Accept": "application/json"
+    "Accept": "application/json",
   };
+  if (roblosecurity) headers.Cookie = `.ROBLOSECURITY=${roblosecurity}`;
+
+  const assetTypes = ["Hair", "Face", "Bundle"];
+  const inventoryData = {};
 
   try {
-    const endpoints = {
-      hair: `https://inventory.roblox.com/v1/users/${userId}/inventory?assetType=Hair&limit=100`,
-      face: `https://inventory.roblox.com/v1/users/${userId}/inventory?assetType=Face&limit=100`,
-      bundle: `https://inventory.roblox.com/v1/users/${userId}/inventory?assetType=Bundle&limit=100`,
-      collectibles: `https://inventory.roblox.com/v1/users/${userId}/assets/collectibles?limit=100`
-    };
-
-    const results = {};
-
-    for (let key in endpoints) {
-      const response = await fetch(endpoints[key], { headers });
-      const data = await response.json();
-      results[key] = data.data || [];
+    // Fetch inventory by type
+    for (const type of assetTypes) {
+      const resp = await fetch(
+        `https://inventory.roblox.com/v1/users/${userId}/inventory?assetType=${type}`,
+        { headers }
+      );
+      const json = await resp.json();
+      inventoryData[type] = json.data || [];
     }
 
-    res.json(results);
+    // Fetch collectibles
+    const collectiblesResp = await fetch(
+      `https://inventory.roblox.com/v1/users/${userId}/assets/collectibles`,
+      { headers }
+    );
+    const collectiblesJson = await collectiblesResp.json();
+    inventoryData.collectibles = collectiblesJson.data || [];
 
+    return res.json({ success: true, inventory: inventoryData });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to fetch inventory" });
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Set port from environment (Railway provides it)
-const PORT = process.env.PORT || 3000;
+// Start server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
